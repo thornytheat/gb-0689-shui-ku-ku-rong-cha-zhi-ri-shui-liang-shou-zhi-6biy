@@ -15,6 +15,7 @@
 | M5 日收支 | 跨午夜切分日水量账 | `/api/m5` | `app/modules/m5_budget/rules.py` `app/modules/m5_budget/service.py` | `tests/test_m5_budget.py` |
 | M6 异常复核 | 按缺测优先裁决超差 | `/api/m6` | `app/modules/m6_review/rules.py` `app/modules/m6_review/service.py` | `tests/test_m6_review.py` |
 | M7 重算留痕 | 核对总积分与重算水位 | `/api/m7` | `app/modules/m7_trace/rules.py` `app/modules/m7_trace/service.py` | `tests/test_m7_trace.py` |
+| 闸门核定出库账 | 逐段裁决饱和/分歧并发布班次账 | `/api/gate/verify` `/api/gate/ledger` `/api/gate/publish` `/api/gate/audit` | `app/modules/gate/rules.py` `app/modules/gate/service.py` `app/modules/gate/store.py` | `tests/test_gate_rules.py` `tests/test_gate_service.py` |
 
 ## 陷阱登记
 
@@ -28,6 +29,10 @@
 | TRAP-14 | 同刻水文矛盾 | 静默填补或算错 | 明确隔离和守恒 | `app/modules/m2_curve/rules.py` | `tests/test_m2_curve.py::test_real_conflict` |
 | TRAP-15 | 升每秒换算 | 静默填补或算错 | 明确隔离和守恒 | `app/modules/m2_curve/rules.py` | `tests/test_m2_curve.py::test_unit_conversion` |
 | TRAP-23 | 午夜切分 | 静默填补或算错 | 明确隔离和守恒 | `app/modules/m5_budget/rules.py` | `tests/test_m5_budget.py::test_midnight_split` |
+| TRAP-24 | 大开度流量计饱和少记泄量 | 沿用梯形积分导致日账偏小 | 饱和段改按操作票泄流曲线查定 | `app/modules/gate/rules.py` | `tests/test_gate_rules.py::test_saturated_interval_adopts_ticket` |
+| TRAP-25 | 换门与短暂启闭使票计不可能逐时相等 | 强行逐时对齐或二选一覆盖 | 合并时间轴逐段裁决，分歧留空待人工 | `app/modules/gate/rules.py` | `tests/test_gate_rules.py::test_dispute_is_unadjudicated` |
+| TRAP-26 | 重跑同日重复扣减 | 每次核定累加出库 | (station,date) 幂等替换工作稿，发布版独立 | `app/modules/gate/store.py` | `tests/test_gate_service.py::test_verify_persists_working_and_is_idempotent` |
+| TRAP-27 | 核定失败覆盖旧版日账 | 有待裁决时段仍写账 | 拒绝发布并保留已发布版本，失败也留痕 | `app/modules/gate/store.py` | `tests/test_gate_service.py::test_publish_then_failed_rerun_keeps_published_version` |
 
 ## 对账规则
 

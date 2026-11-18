@@ -1,1 +1,68 @@
-{% extends "base.html" %}{% block content %}<div class="quad">{% for x in result.budgets %}<section class="panel"><div class="panel__head"><h2>{{x.date}} / {{x.station}}</h2><span class="tag {% if x.state=='缺测' %}warn{% endif %}">{{x.state}}</span></div><div class="waterfall">{% set scale=[x.in_m3|float,x.out_m3|float,x.storage_change|float|abs,x.residual|float|abs,1]|max %}{% for key,label in [('in_m3','入库'),('out_m3','出库'),('storage_change','库变'),('residual','差额')] %}<div><label>{{label}}</label><div><i class="bar-{{key}}" style="width:{{x[key]|float|abs/scale*100}}%"></i></div><b>{{'%.1f'|format(x[key]|float)}}</b></div>{% endfor %}</div><div class="coverage">覆盖 {{x.coverage_hours}} / 24 h</div></section>{% endfor %}<section class="panel wide"><div class="panel__head"><h2>日水量账</h2></div>{{table(data.rows,['date','coverage_hours','in_m3','out_m3','storage_change','residual'])}}</section></div>{% endblock %}
+{% extends "base.html" %}
+{% block content %}
+<div class="quad">
+  {% for x in result.budgets %}
+  <section class="panel"><div class="panel__head"><h2>{{x.date}} / {{x.station}}</h2><span class="tag {% if x.state=='缺测' %}warn{% endif %}">{{x.state}}</span></div><div class="waterfall">{% set scale=[x.in_m3|float,x.out_m3|float,x.storage_change|float|abs,x.residual|float|abs,1]|max %}{% for key,label in [('in_m3','入库'),('out_m3','出库'),('storage_change','库变'),('residual','差额')] %}<div><label>{{label}}</label><div><i class="bar-{{key}}" style="width:{{x[key]|float|abs/scale*100}}%"></i></div><b>{{'%.1f'|format(x[key]|float)}}</b></div>{% endfor %}</div><div class="coverage">覆盖 {{x.coverage_hours}} / 24 h</div></section>
+  {% endfor %}
+  <section class="panel wide"><div class="panel__head"><h2>日水量账（流量计口径）</h2><span class="tag warn">大开度饱和时少记</span></div>{{table(data.rows,['date','coverage_hours','in_m3','out_m3','storage_change','residual'])}}</section>
+
+  <section class="panel wide">
+    <div class="panel__head"><h2>每日核定出库账 · 班次发布</h2><span class="tag">只核算不控闸</span></div>
+    <form id="gate-verify-form" class="gate-form" data-run="{{result.manifest.run_id}}">
+      <div class="parameters">
+        <label>饱和阈值 m³/s（出流≥阈值判饱和）<input name="outflow_saturation" value="{{defaults.outflow_saturation}}"></label>
+        <label>票计相对容差（0.10=10%）<input name="gate_tolerance" value="{{defaults.gate_tolerance}}"></label>
+      </div>
+      <label>闸门操作票 CSV（ticket_id,station,gate,start,end,opening_m；时间带时区，跨午夜自动拆落日）
+        <textarea name="ticket_text">{{gate_sample}}</textarea></label>
+      <button class="btn primary" type="submit">核定出库（按当前计量批次）</button>
+      <span class="hint">计量依据批次：{{result.manifest.run_id}} · 日界 +08:00 · 重跑同日整体替换，不重复扣减</span>
+    </form>
+  </section>
+
+  <section class="panel wide">
+    <div class="panel__head"><h2>核定账本</h2><span>{{gate_ledger|length}} 个落日</span></div>
+    {% if gate_ledger %}
+    <div class="scroll"><table class="ledger">
+      <thead><tr><th>日期 +08</th><th>测站</th><th>状态</th><th class="num">核定出库 m³</th><th class="num">流量计计 m³</th><th class="num">操作票计 m³</th><th class="num">未裁决 m³</th><th>采用依据分布</th><th>发布版本</th><th>操作</th></tr></thead>
+      <tbody>
+      {% for row in gate_ledger %}
+        {% set w=row.working %}
+        <tr>
+          <td>{{w.date}}</td><td>{{w.station}}</td>
+          <td><span class="tag {% if w.state!='完整' %}warn{% endif %}">{{w.state}}</span></td>
+          <td class="num">{{'%.2f'|format(w.verified_m3|float)}}</td>
+          <td class="num">{{'%.2f'|format(w.meter_m3|float)}}</td>
+          <td class="num">{{'%.2f'|format(w.gate_m3|float)}}</td>
+          <td class="num">{{'%.2f'|format(w.unadjudicated_m3|float)}}</td>
+          <td class="basis-cell">{% for code,n in w.basis_count.items() %}<span class="basis basis-{{code}}">{{code}}×{{n}}</span>{% endfor %}</td>
+          <td class="num">{% if row.published %}V{{row.published_version}}{% else %}未发布{% endif %}</td>
+          <td>
+            <button class="btn ghost gate-detail" data-station="{{w.station}}" data-date="{{w.date}}">回查时段</button>
+            <button class="btn primary gate-publish" data-station="{{w.station}}" data-date="{{w.date}}"
+                    data-version="{{row.published_version}}" {% if w.uncertain %}disabled title="存在无法裁决时段，核定失败保留旧版"{% endif %}>
+              发布班次账
+            </button>
+          </td>
+        </tr>
+        <tr class="uncertain-row" id="uncertain-{{w.station}}-{{w.date}}" hidden>
+          <td colspan="10">
+            <div class="trace-box">
+              <small>计量批次 {{row.run_id}} · 更新于 {{row.updated_at[:19]}} UTC</small>
+              {% if w.uncertain %}
+              <b>无法裁决时段（需人工归因，发布前必须清零）：</b>
+              <ul>{% for u in w.uncertain %}<li><code>{{u.basis}}</code> {{u.start[:19]}} → {{u.end[:19]}} · {{u.detail}} · 票 {{u.ticket_ids|join(',') or '—'}} / 测次 {{u.meter_ids|join(',') or '—'}}</li>{% endfor %}</ul>
+              {% endif %}
+              <b>逐时裁决依据：</b>
+              <ul class="seg-list">{% for s in w.segments %}<li><code class="basis basis-{{s.basis}}">{{s.basis}}</code> {{s.start[:19]}}→{{s.end[:19]}} · 计量 {{'%.2f'|format(s.meter_vol_m3|default(0)|float)}} / 票计 {{'%.2f'|format(s.gate_vol_m3|default(0)|float)}} / 采用 {{s.adopted_m3 if s.adopted_m3 is not none else '—'}} · {{s.basis_detail}} · 票{{s.ticket_ids|join(',') or '—'}} 测次{{s.meter_ids|join(',') or '—'}}</li>{% endfor %}</ul>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody></table></div>
+    {% else %}
+    <div class="quality-block"><b>尚无核定账</b><small>粘贴操作票并点击“核定出库”，系统按操作票与流量计逐段裁决。</small></div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
